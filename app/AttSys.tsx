@@ -13,7 +13,6 @@ export default function Index() {
       }}
     >
 
-      <Dropdown></Dropdown>
       <Text>Select Event</Text>
       <Button title={"scan fingerprint"}></Button>
       <Text>Status: Ready</Text>
