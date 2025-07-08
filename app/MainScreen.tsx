@@ -7,8 +7,8 @@ import { Appbar, Avatar, Button, Card, List, Text, TextInput } from 'react-nativ
 export default function AttendanceScreen() {
   const [employeeId, setEmployeeId] = useState('');
   const [attendanceRecords, setAttendanceRecords] = useState([
-    // { id: '1', name: 'John Doe', time: '09:00 AM', status: 'Checked In', date: 'May 15' },
-    // { id: '2', name: 'Jane Smith', time: '09:05 AM', status: 'Checked In', date: 'May 15' },
+    { id: '1', name: 'John Doe', time: '09:00 AM', status: 'Checked In', date: 'May 15' },
+    { id: '2', name: 'Jane Smith', time: '09:05 AM', status: 'Checked In', date: 'May 15' },
   ]);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
 
@@ -36,6 +36,28 @@ export default function AttendanceScreen() {
     }
   };
 
+  const data = [
+    { label: 'Item 1', value: '1' },
+    { label: 'Item 2', value: '2' },
+    { label: 'Item 3', value: '3' },
+  ];
+
+  const DropdownComponent = () => {
+    const [value, setValue] = useState(null);
+    const [isFocus, setIsFocus] = useState(false);
+
+    const renderLabel = () => {
+      if (value || isFocus) {
+        return (
+          <Text style={[styles.label, isFocus && { color: 'blue' }]}>
+            Select event
+          </Text>
+        );
+      }
+      return null;
+    };
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -49,6 +71,14 @@ export default function AttendanceScreen() {
 
       {/* Main Content */}
       <ScrollView contentContainerStyle={styles.content}>
+        {/* Events Card */}
+        <Card style={styles.dropdownCard}>
+          <Card.Title
+            title="Select Event"
+            right={(props) => <MaterialCommunityIcons {...props} name="flag" size={24} />}
+          />
+        </Card>
+          
         {/* Authentication Card */}
         <Card style={styles.authCard}>
           <Card.Title
@@ -137,6 +167,10 @@ const styles = StyleSheet.create({
   authCard: {
     marginBottom: 16,
   },
+  dropdownCard: {
+    marginBottom: 16,
+    paddingRight: 12,
+  },
   input: {
     marginBottom: 16,
     backgroundColor: 'white',
@@ -177,4 +211,13 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
   },
+  label: {
+    position: 'absolute',
+    backgroundColor: 'white',
+    left: 22,
+    top: 8,
+    zIndex: 999,
+    paddingHorizontal: 8,
+    fontSize: 14,
+    },
 });
