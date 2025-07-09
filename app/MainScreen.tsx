@@ -2,61 +2,79 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useState } from 'react';
 import { SafeAreaView, ScrollView, StyleSheet } from 'react-native';
+import DropDownPicker from 'react-native-dropdown-picker';
 import { Appbar, Avatar, Button, Card, List, Text, TextInput } from 'react-native-paper';
 
 export default function AttendanceScreen() {
+  // Employee authentication state
   const [employeeId, setEmployeeId] = useState('');
-  const [attendanceRecords, setAttendanceRecords] = useState([
-    { id: '1', name: 'John Doe', time: '09:00 AM', status: 'Checked In', date: 'May 15' },
-    { id: '2', name: 'Jane Smith', time: '09:05 AM', status: 'Checked In', date: 'May 15' },
-  ]);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  
+  // Event dropdown state
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState(null);
+  const [items, setItems] = useState([
+    {label: 'Sample Event 1', value: 'event1'},
+    {label: 'Sample Event 2', value: 'event2'},
+    {label: 'Sample Event 3', value: 'event3'},
+    {label: 'Sample Event 4', value: 'event4'},
+  ]);
+
+  // Attendance records
+  const [attendanceRecords, setAttendanceRecords] = useState([
+    { id: '1', name: 'John Doe', time: '09:00 AM', status: 'Checked In', date: 'May 15', event: 'Sample Event 1' },
+    { id: '2', name: 'Jane Smith', time: '09:05 AM', status: 'Checked In', date: 'May 15', event: 'Sample Event 1' },
+  ]);
 
   const handleFingerprintAuth = async () => {
+    if (!value) {
+      alert('Please select an event first');
+      return;
+    }
+    
+    if (!employeeId) {
+      alert('Please enter employee ID');
+      return;
+    }
+
     setIsAuthenticating(true);
     try {
+      // Check if biometrics are available
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+      if (!isEnrolled) {
+        alert('No biometrics registered on this device');
+        return;
+      }
+
+      // Authenticate fingerprint
       const { success } = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Verify your identity',
+        promptMessage: 'Verify your identity for attendance',
+        cancelLabel: 'Cancel',
+        disableDeviceFallback: true,
       });
 
       if (success) {
-        // Add to attendance records
+        // Record attendance
         const newRecord = {
           id: Date.now().toString(),
           name: `Employee ${employeeId}`,
-          time: new Date().toLocaleTimeString(),
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           status: 'Checked In',
-          date: new Date().toLocaleDateString()
+          date: new Date().toLocaleDateString(),
+          event: items.find(item => item.value === value)?.label || 'Unknown Event'
         };
+        
         setAttendanceRecords([newRecord, ...attendanceRecords]);
         setEmployeeId('');
+        alert(`Successfully checked in to ${newRecord.event}`);
       }
+    } catch (error) {
+      console.error('Authentication error:', error);
+      alert('Authentication failed. Please try again.');
     } finally {
       setIsAuthenticating(false);
     }
   };
-
-  const data = [
-    { label: 'Item 1', value: '1' },
-    { label: 'Item 2', value: '2' },
-    { label: 'Item 3', value: '3' },
-  ];
-
-  const DropdownComponent = () => {
-    const [value, setValue] = useState(null);
-    const [isFocus, setIsFocus] = useState(false);
-
-    const renderLabel = () => {
-      if (value || isFocus) {
-        return (
-          <Text style={[styles.label, isFocus && { color: 'blue' }]}>
-            Select event
-          </Text>
-        );
-      }
-      return null;
-    };
-  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -71,12 +89,27 @@ export default function AttendanceScreen() {
 
       {/* Main Content */}
       <ScrollView contentContainerStyle={styles.content}>
-        {/* Events Card */}
+        {/* Event Selection Dropdown */}
         <Card style={styles.dropdownCard}>
           <Card.Title
             title="Select Event"
-            right={(props) => <MaterialCommunityIcons {...props} name="flag" size={24} />}
+            left={(props) => <MaterialCommunityIcons {...props} name="calendar" size={24} />}
           />
+          <Card.Content>
+            <DropDownPicker
+              open={open}
+              value={value}
+              items={items}
+              setOpen={setOpen}
+              setValue={setValue}
+              setItems={setItems}
+              placeholder="Select an event"
+              style={styles.dropdown}
+              dropDownContainerStyle={styles.dropdownContainer}
+              zIndex={3000}
+              zIndexInverse={1000}
+            />
+          </Card.Content>
         </Card>
           
         {/* Authentication Card */}
@@ -92,38 +125,21 @@ export default function AttendanceScreen() {
               onChangeText={setEmployeeId}
               keyboardType="numeric"
               style={styles.input}
+              mode="outlined"
             />
             <Button
               mode="contained"
               icon="fingerprint"
               loading={isAuthenticating}
-              disabled={!employeeId || isAuthenticating}
+              disabled={!employeeId || !value || isAuthenticating}
               onPress={handleFingerprintAuth}
               style={styles.authButton}
+              labelStyle={styles.authButtonText}
             >
-              {isAuthenticating ? 'Authenticating...' : 'Scan Fingerprint'}
+              {isAuthenticating ? 'Verifying...' : 'Authenticate & Check In'}
             </Button>
           </Card.Content>
         </Card>
-
-        {/* Today's Summary */}
-        {/* <Card style={styles.summaryCard}>
-          <Card.Title title="Today's Summary" />
-          <Card.Content style={styles.summaryContent}>
-            <View style={styles.summaryItem}>
-              <Text variant="labelLarge">Present</Text>
-              <Text variant="headlineMedium">42</Text>
-            </View>
-            <View style={styles.summaryItem}>
-              <Text variant="labelLarge">Late</Text>
-              <Text variant="headlineMedium">3</Text>
-            </View>
-            <View style={styles.summaryItem}>
-              <Text variant="labelLarge">Absent</Text>
-              <Text variant="headlineMedium">5</Text>
-            </View>
-          </Card.Content>
-        </Card> */}
 
         {/* Recent Activity */}
         <Card style={styles.activityCard}>
@@ -133,24 +149,30 @@ export default function AttendanceScreen() {
               <List.Item
                 key={record.id}
                 title={record.name}
-                description={`${record.time} • ${record.date}`}
-                left={props => <Avatar.Text {...props} label={record.name.split(' ').map(n => n[0]).join('')} />}
-                right={props => <Text {...props} style={record.status === 'Checked In' ? styles.successText : styles.warningText}>
-                  {record.status}
-                </Text>}
+                description={`${record.event} • ${record.time} • ${record.date}`}
+                left={props => (
+                  <Avatar.Text 
+                    {...props} 
+                    label={record.name.split(' ').map(n => n[0]).join('')} 
+                    style={styles.avatar}
+                  />
+                )}
+                right={props => (
+                  <Text 
+                    {...props} 
+                    style={[
+                      styles.statusText,
+                      record.status === 'Checked In' ? styles.successText : styles.warningText
+                    ]}
+                  >
+                    {record.status}
+                  </Text>
+                )}
               />
             ))}
           </Card.Content>
         </Card>
       </ScrollView>
-
-      {/* Bottom Navigation */}
-      {/* <Appbar style={styles.bottomBar}>
-        <Appbar.Action icon="home" />
-        <Appbar.Action icon="calendar" />
-        <Appbar.Action icon="chart-bar" />
-        <Appbar.Action icon="account" />
-      </Appbar> */}
     </SafeAreaView>
   );
 }
@@ -162,62 +184,51 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
-    paddingBottom: 80,
+    paddingBottom: 20,
+  },
+  dropdownCard: {
+    marginBottom: 16,
   },
   authCard: {
     marginBottom: 16,
   },
-  dropdownCard: {
+  activityCard: {
     marginBottom: 16,
-    paddingRight: 12,
   },
   input: {
     marginBottom: 16,
     backgroundColor: 'white',
   },
+  dropdown: {
+    backgroundColor: 'white',
+    borderColor: '#ddd',
+    borderRadius: 4,
+  },
+  dropdownContainer: {
+    backgroundColor: 'white',
+    borderColor: '#ddd',
+    marginTop: 2,
+  },
   authButton: {
     marginTop: 8,
-    paddingVertical: 6,
+    paddingVertical: 8,
+    backgroundColor: '#3f51b5',
   },
-  summaryCard: {
-    marginBottom: 16,
+  authButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
   },
-  summaryContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
+  avatar: {
+    backgroundColor: '#e0e0e0',
   },
-  summaryItem: {
-    alignItems: 'center',
-    padding: 8,
-  },
-  activityCard: {
-    marginBottom: 16,
+  statusText: {
+    alignSelf: 'center',
+    fontWeight: 'bold',
   },
   successText: {
     color: '#4CAF50',
-    alignSelf: 'center',
   },
   warningText: {
     color: '#FF9800',
-    alignSelf: 'center',
   },
-  bottomBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'white',
-    justifyContent: 'space-around',
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  label: {
-    position: 'absolute',
-    backgroundColor: 'white',
-    left: 22,
-    top: 8,
-    zIndex: 999,
-    paddingHorizontal: 8,
-    fontSize: 14,
-    },
 });
