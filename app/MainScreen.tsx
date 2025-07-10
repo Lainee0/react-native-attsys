@@ -3,7 +3,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, View } from 'react-native';
-import { Appbar, Avatar, Button, Card, List, Text, TextInput } from 'react-native-paper';
+import { Appbar, Avatar, Button, Card, IconButton, List, Modal, PaperProvider, Portal, Text, TextInput } from 'react-native-paper';
 
 type Employee = {
   id: string;
@@ -20,7 +20,15 @@ type AttendanceRecord = {
   status: 'Checked In' | 'Checked Out';
 };
 
-export default function AttendanceSystem() {
+export default function App() {
+  return (
+    <PaperProvider>
+      <AttendanceSystem />
+    </PaperProvider>
+  );
+}
+
+function AttendanceSystem() {
   // States
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
@@ -28,6 +36,10 @@ export default function AttendanceSystem() {
   const [newEmployeeId, setNewEmployeeId] = useState('');
   const [currentEvent, setCurrentEvent] = useState('');
   const [mode, setMode] = useState<'register' | 'attend'>('attend');
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editId, setEditId] = useState('');
+  const [visible, setVisible] = useState(false);
 
   // Load data on startup
   useEffect(() => {
@@ -91,6 +103,53 @@ export default function AttendanceSystem() {
     }
   };
 
+  // Edit Employee
+  const startEditing = (employee: Employee) => {
+    setEditingEmployee(employee);
+    setEditName(employee.name);
+    setEditId(employee.employeeId);
+    setVisible(true);
+  };
+
+  const saveEdit = async () => {
+    if (!editingEmployee || !editName.trim() || !editId.trim()) return;
+
+    if (employees.some(e => e.employeeId === editId && e.id !== editingEmployee.id)) {
+      Alert.alert('Error', 'Employee ID already exists');
+      return;
+    }
+
+    const updatedEmployees = employees.map(emp => 
+      emp.id === editingEmployee.id ? { ...emp, name: editName, employeeId: editId } : emp
+    );
+
+    setEmployees(updatedEmployees);
+    await saveData();
+    setVisible(false);
+    Alert.alert('Success', 'Employee updated');
+  };
+
+  // Delete Employee
+  const deleteEmployee = async (employeeId: string) => {
+    Alert.alert(
+      'Confirm Delete',
+      'Are you sure you want to delete this employee?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: async () => {
+            const updatedEmployees = employees.filter(emp => emp.id !== employeeId);
+            setEmployees(updatedEmployees);
+            await saveData();
+            Alert.alert('Success', 'Employee deleted');
+          }
+        }
+      ]
+    );
+  };
+
   // Mark Attendance
   const markAttendance = async () => {
     if (!currentEvent) {
@@ -132,11 +191,12 @@ export default function AttendanceSystem() {
 
   return (
     <View style={styles.container}>
-      <Appbar.Header>
-        <Appbar.Content title="Employee Attendance System" />
+      <Appbar.Header style={styles.header}>
+        <Appbar.Content title="Employee Attendance" titleStyle={styles.headerTitle} />
         <Appbar.Action 
           icon={mode === 'register' ? 'calendar-check' : 'account-plus'} 
           onPress={() => setMode(mode === 'register' ? 'attend' : 'register')}
+          color="#fff"
         />
       </Appbar.Header>
 
@@ -145,7 +205,8 @@ export default function AttendanceSystem() {
           <Card style={styles.card}>
             <Card.Title 
               title="Register Employee" 
-              left={() => <MaterialCommunityIcons name="account-plus" size={24} />}
+              titleStyle={styles.cardTitle}
+              left={() => <MaterialCommunityIcons name="account-plus" size={24} color="#3a86ff" />}
             />
             <Card.Content>
               <TextInput
@@ -153,6 +214,7 @@ export default function AttendanceSystem() {
                 value={newEmployeeName}
                 onChangeText={setNewEmployeeName}
                 style={styles.input}
+                mode="outlined"
               />
               <TextInput
                 label="Employee ID"
@@ -160,12 +222,14 @@ export default function AttendanceSystem() {
                 onChangeText={setNewEmployeeId}
                 keyboardType="numeric"
                 style={styles.input}
+                mode="outlined"
               />
               <Button
                 mode="contained"
                 icon="fingerprint"
                 onPress={registerEmployee}
-                style={styles.button}
+                style={styles.primaryButton}
+                labelStyle={styles.buttonLabel}
               >
                 Register Fingerprint
               </Button>
@@ -175,7 +239,8 @@ export default function AttendanceSystem() {
           <Card style={styles.card}>
             <Card.Title 
               title="Mark Attendance" 
-              left={() => <MaterialCommunityIcons name="fingerprint" size={24} />}
+              titleStyle={styles.cardTitle}
+              left={() => <MaterialCommunityIcons name="fingerprint" size={24} color="#3a86ff" />}
             />
             <Card.Content>
               <TextInput
@@ -183,12 +248,14 @@ export default function AttendanceSystem() {
                 value={currentEvent}
                 onChangeText={setCurrentEvent}
                 style={styles.input}
+                mode="outlined"
               />
               <Button
                 mode="contained"
                 icon="login"
                 onPress={markAttendance}
-                style={styles.button}
+                style={styles.primaryButton}
+                labelStyle={styles.buttonLabel}
               >
                 Authenticate & Check In
               </Button>
@@ -198,14 +265,33 @@ export default function AttendanceSystem() {
 
         {/* Employees List */}
         <Card style={styles.card}>
-          <Card.Title title="Registered Employees" />
+          <Card.Title title="Registered Employees" titleStyle={styles.cardTitle} />
           <Card.Content>
             {employees.map(employee => (
               <List.Item
                 key={employee.id}
                 title={employee.name}
                 description={`ID: ${employee.employeeId}`}
-                left={props => <Avatar.Text {...props} label={employee.name[0]} />}
+                titleStyle={styles.listItemTitle}
+                descriptionStyle={styles.listItemDescription}
+                left={props => <Avatar.Text {...props} label={employee.name[0]} style={styles.avatar} />}
+                right={() => (
+                  <View style={styles.actions}>
+                    <IconButton
+                      icon="pencil"
+                      size={20}
+                      onPress={() => startEditing(employee)}
+                      iconColor="#3a86ff"
+                    />
+                    <IconButton
+                      icon="delete"
+                      size={20}
+                      onPress={() => deleteEmployee(employee.id)}
+                      iconColor="#ff4d4d"
+                    />
+                  </View>
+                )}
+                style={styles.listItem}
               />
             ))}
           </Card.Content>
@@ -213,20 +299,72 @@ export default function AttendanceSystem() {
 
         {/* Attendance Records */}
         <Card style={styles.card}>
-          <Card.Title title="Attendance Records" />
+          <Card.Title title="Attendance Records" titleStyle={styles.cardTitle} />
           <Card.Content>
             {attendance.slice(0, 10).map(record => (
               <List.Item
                 key={record.id}
                 title={record.employeeName}
-                description={`${record.eventId} - ${new Date(record.timestamp).toLocaleString()}`}
-                left={props => <Avatar.Text {...props} label={record.employeeName[0]} />}
-                right={props => <Text {...props} style={styles.attendanceStatus}>{record.status}</Text>}
+                description={`${record.eventId} • ${new Date(record.timestamp).toLocaleString()}`}
+                titleStyle={styles.listItemTitle}
+                descriptionStyle={styles.listItemDescription}
+                left={props => <Avatar.Text {...props} label={record.employeeName[0]} style={styles.avatar} />}
+                right={props => (
+                  <Text {...props} style={[
+                    styles.attendanceStatus,
+                    record.status === 'Checked In' ? styles.statusSuccess : styles.statusWarning
+                  ]}>
+                    {record.status}
+                  </Text>
+                )}
+                style={styles.listItem}
               />
             ))}
           </Card.Content>
         </Card>
       </ScrollView>
+
+      {/* Edit Modal */}
+      <Portal>
+        <Modal visible={visible} onDismiss={() => setVisible(false)}>
+          <Card style={styles.modalCard}>
+            <Card.Title title="Edit Employee" titleStyle={styles.cardTitle} />
+            <Card.Content>
+              <TextInput
+                label="Full Name"
+                value={editName}
+                onChangeText={setEditName}
+                style={styles.input}
+                mode="outlined"
+              />
+              <TextInput
+                label="Employee ID"
+                value={editId}
+                onChangeText={setEditId}
+                keyboardType="numeric"
+                style={styles.input}
+                mode="outlined"
+              />
+              <Button
+                mode="contained"
+                onPress={saveEdit}
+                style={styles.primaryButton}
+                labelStyle={styles.buttonLabel}
+              >
+                Save Changes
+              </Button>
+              <Button
+                mode="outlined"
+                onPress={() => setVisible(false)}
+                style={styles.secondaryButton}
+                labelStyle={styles.buttonLabel}
+              >
+                Cancel
+              </Button>
+            </Card.Content>
+          </Card>
+        </Modal>
+      </Portal>
     </View>
   );
 }
@@ -234,25 +372,84 @@ export default function AttendanceSystem() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8f9fa',
+  },
+  header: {
+    backgroundColor: '#3a86ff',
+    elevation: 0,
+    shadowOpacity: 0,
+  },
+  headerTitle: {
+    color: '#fff',
+    fontWeight: '600',
   },
   content: {
     padding: 16,
-    paddingBottom: 32,
+    paddingBottom: 24,
   },
   card: {
     marginBottom: 16,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    elevation: 1,
+  },
+  cardTitle: {
+    color: '#2b2d42',
+    fontWeight: '600',
+  },
+  modalCard: {
+    margin: 20,
+    padding: 16,
+    backgroundColor: '#fff',
+    borderRadius: 8,
   },
   input: {
     marginBottom: 16,
-    backgroundColor: 'white',
+    backgroundColor: '#fff',
   },
-  button: {
+  primaryButton: {
     marginTop: 8,
+    backgroundColor: '#3a86ff',
+    borderRadius: 4,
+    paddingVertical: 6,
+  },
+  secondaryButton: {
+    marginTop: 8,
+    borderColor: '#3a86ff',
+    borderRadius: 4,
+    paddingVertical: 6,
+  },
+  buttonLabel: {
+    color: '#fff',
+    fontWeight: '500',
+  },
+  actions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatar: {
+    backgroundColor: '#e9ecef',
+  },
+  listItem: {
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f3f5',
+  },
+  listItemTitle: {
+    color: '#2b2d42',
+    fontWeight: '500',
+  },
+  listItemDescription: {
+    color: '#6c757d',
   },
   attendanceStatus: {
     alignSelf: 'center',
-    color: '#4CAF50',
-    fontWeight: 'bold',
+    fontWeight: '500',
+  },
+  statusSuccess: {
+    color: '#28a745',
+  },
+  statusWarning: {
+    color: '#ffc107',
   },
 });
