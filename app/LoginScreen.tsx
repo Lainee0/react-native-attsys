@@ -30,7 +30,7 @@ export default function LoginScreen() {
     setTimeout(() => {
       setLoading(false);
       if (email === 'admin@company.com' && password === 'admin123') {
-        navigator.navigate('AdminPanel');
+        navigation.navigate('AdminPanel');
       } else {
         setError('Invalid credentials');
       }

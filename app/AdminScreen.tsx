@@ -172,7 +172,7 @@ export default function AdminPanel() {
 
             {filteredRecords.length === 0 && (
               <DataTable.Row>
-                <DataTable.Cell style={styles.noRecords} colSpan={5}>
+                <DataTable.Cell style={styles.noRecords}>
                   <Text style={styles.noRecordsText}>No attendance records found</Text>
                 </DataTable.Cell>
               </DataTable.Row>
@@ -284,6 +284,7 @@ const styles = StyleSheet.create({
   noRecords: {
     justifyContent: 'center',
     paddingVertical: 24,
+    flex: 5,
   },
   noRecordsText: {
     textAlign: 'center',
