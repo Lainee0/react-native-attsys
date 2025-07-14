@@ -2,7 +2,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import React, { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { Appbar, Avatar, Button, Card, IconButton, List, Modal, PaperProvider, Portal, Text, TextInput } from 'react-native-paper';
 
 type Employee = {
@@ -20,15 +20,7 @@ type AttendanceRecord = {
   status: 'Checked In' | 'Checked Out';
 };
 
-export default function App() {
-  return (
-    <PaperProvider>
-      <AttendanceSystem />
-    </PaperProvider>
-  );
-}
-
-function AttendanceSystem() {
+export default function MainScreen() {
   // States
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
@@ -40,14 +32,16 @@ function AttendanceSystem() {
   const [editName, setEditName] = useState('');
   const [editId, setEditId] = useState('');
   const [visible, setVisible] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Load data on startup
+  // Load data on startup and when refreshed
   useEffect(() => {
     loadData();
   }, []);
 
   const loadData = async () => {
     try {
+      setRefreshing(true);
       const savedEmployees = await SecureStore.getItemAsync('employees');
       const savedAttendance = await SecureStore.getItemAsync('attendance');
       
@@ -55,6 +49,8 @@ function AttendanceSystem() {
       if (savedAttendance) setAttendance(JSON.parse(savedAttendance));
     } catch (error) {
       Alert.alert('Error', 'Failed to load data');
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -64,6 +60,7 @@ function AttendanceSystem() {
       await SecureStore.setItemAsync('attendance', JSON.stringify(attendance));
     } catch (error) {
       Alert.alert('Error', 'Failed to save data');
+      console.error('Save error:', error);
     }
   };
 
@@ -92,11 +89,24 @@ function AttendanceSystem() {
           employeeId: newEmployeeId,
         };
 
-        setEmployees([...employees, newEmployee]);
+        // Create updated employees array
+        const updatedEmployees = [...employees, newEmployee];
+        
+        // Update state
+        setEmployees(updatedEmployees);
         setNewEmployeeName('');
         setNewEmployeeId('');
-        await saveData();
-        Alert.alert('Success', 'Employee registered with fingerprint');
+
+        // Save to SecureStore
+        try {
+          await SecureStore.setItemAsync('employees', JSON.stringify(updatedEmployees));
+          Alert.alert('Success', 'Employee registered with fingerprint');
+        } catch (saveError) {
+          console.error('Failed to save employee:', saveError);
+          Alert.alert('Error', 'Failed to save employee data');
+          // Rollback the state if save fails
+          setEmployees(employees);
+        }
       }
     } catch (error) {
       Alert.alert('Error', 'Fingerprint registration failed');
@@ -123,8 +133,20 @@ function AttendanceSystem() {
       emp.id === editingEmployee.id ? { ...emp, name: editName, employeeId: editId } : emp
     );
 
+    // Also update attendance records if employee ID changed
+    const updatedAttendance = attendance.map(record => 
+      record.employeeId === editingEmployee.employeeId 
+        ? { ...record, employeeId: editId, employeeName: editName } 
+        : record
+    );
+
     setEmployees(updatedEmployees);
-    await saveData();
+    setAttendance(updatedAttendance);
+    
+    // Save both updates
+    await SecureStore.setItemAsync('employees', JSON.stringify(updatedEmployees));
+    await SecureStore.setItemAsync('attendance', JSON.stringify(updatedAttendance));
+    
     setVisible(false);
     Alert.alert('Success', 'Employee updated');
   };
@@ -142,7 +164,12 @@ function AttendanceSystem() {
           onPress: async () => {
             const updatedEmployees = employees.filter(emp => emp.id !== employeeId);
             setEmployees(updatedEmployees);
-            await saveData();
+            // Also remove any attendance records for this employee
+            const updatedAttendance = attendance.filter(record => record.employeeId !== employeeId);
+            setAttendance(updatedAttendance);
+            // Save both updates
+            await SecureStore.setItemAsync('employees', JSON.stringify(updatedEmployees));
+            await SecureStore.setItemAsync('attendance', JSON.stringify(updatedAttendance));
             Alert.alert('Success', 'Employee deleted');
           }
         }
@@ -163,9 +190,9 @@ function AttendanceSystem() {
       });
 
       if (success) {
-        // In a real app, you would match against specific employee fingerprint
+        // Find the employee by matching fingerprint (in real app use actual biometric matching)
         // For demo, we'll use the first employee
-        const employee = employees[0]; 
+        const employee = employees[0];
         
         if (employee) {
           const newRecord: AttendanceRecord = {
@@ -177,9 +204,13 @@ function AttendanceSystem() {
             status: 'Checked In',
           };
 
-          setAttendance([...attendance, newRecord]);
-          await saveData();
+          // Update both local state and storage
+          const updatedAttendance = [...attendance, newRecord];
+          setAttendance(updatedAttendance);
+          await SecureStore.setItemAsync('attendance', JSON.stringify(updatedAttendance));
+          
           Alert.alert('Success', `${employee.name} checked in to ${currentEvent}`);
+          setCurrentEvent('');
         } else {
           Alert.alert('Error', 'No registered employees found');
         }
@@ -190,182 +221,199 @@ function AttendanceSystem() {
   };
 
   return (
-    <View style={styles.container}>
-      <Appbar.Header style={styles.header}>
-        <Appbar.Content title="Employee Attendance" titleStyle={styles.headerTitle} />
-        <Appbar.Action 
-          icon={mode === 'register' ? 'calendar-check' : 'account-plus'} 
-          onPress={() => setMode(mode === 'register' ? 'attend' : 'register')}
-          color="#fff"
-        />
-      </Appbar.Header>
+    <PaperProvider>
+      <View style={styles.container}>
+        <Appbar.Header style={styles.header}>
+          <Appbar.Content title="Employee Attendance" titleStyle={styles.headerTitle} />
+          <Appbar.Action 
+            icon="refresh" 
+            onPress={loadData}
+            color="#fff"
+          />
+          <Appbar.Action 
+            icon={mode === 'register' ? 'calendar-check' : 'account-plus'} 
+            onPress={() => setMode(mode === 'register' ? 'attend' : 'register')}
+            color="#fff"
+          />
+        </Appbar.Header>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        {mode === 'register' ? (
-          <Card style={styles.card}>
-            <Card.Title 
-              title="Register Employee" 
-              titleStyle={styles.cardTitle}
-              left={() => <MaterialCommunityIcons name="account-plus" size={24} color="#3a86ff" />}
+        <ScrollView 
+          contentContainerStyle={styles.content}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={loadData}
+              colors={['#3a86ff']}
+              tintColor="#3a86ff"
             />
-            <Card.Content>
-              <TextInput
-                label="Full Name"
-                value={newEmployeeName}
-                onChangeText={setNewEmployeeName}
-                style={styles.input}
-                mode="outlined"
+          }  
+        >
+          {mode === 'register' ? (
+            <Card style={styles.card}>
+              <Card.Title 
+                title="Register Employee" 
+                titleStyle={styles.cardTitle}
+                left={() => <MaterialCommunityIcons name="account-plus" size={24} color="#3a86ff" />}
               />
-              <TextInput
-                label="Employee ID"
-                value={newEmployeeId}
-                onChangeText={setNewEmployeeId}
-                keyboardType="numeric"
-                style={styles.input}
-                mode="outlined"
+              <Card.Content>
+                <TextInput
+                  label="Full Name"
+                  value={newEmployeeName}
+                  onChangeText={setNewEmployeeName}
+                  style={styles.input}
+                  mode="outlined"
+                />
+                <TextInput
+                  label="Employee ID"
+                  value={newEmployeeId}
+                  onChangeText={setNewEmployeeId}
+                  keyboardType="numeric"
+                  style={styles.input}
+                  mode="outlined"
+                />
+                <Button
+                  mode="contained"
+                  icon="fingerprint"
+                  onPress={registerEmployee}
+                  style={styles.primaryButton}
+                  labelStyle={styles.buttonLabel}
+                >
+                  Register Fingerprint
+                </Button>
+              </Card.Content>
+            </Card>
+          ) : (
+            <Card style={styles.card}>
+              <Card.Title 
+                title="Mark Attendance" 
+                titleStyle={styles.cardTitle}
+                left={() => <MaterialCommunityIcons name="fingerprint" size={24} color="#3a86ff" />}
               />
-              <Button
-                mode="contained"
-                icon="fingerprint"
-                onPress={registerEmployee}
-                style={styles.primaryButton}
-                labelStyle={styles.buttonLabel}
-              >
-                Register Fingerprint
-              </Button>
-            </Card.Content>
-          </Card>
-        ) : (
+              <Card.Content>
+                <TextInput
+                  label="Event Name"
+                  value={currentEvent}
+                  onChangeText={setCurrentEvent}
+                  style={styles.input}
+                  mode="outlined"
+                />
+                <Button
+                  mode="contained"
+                  icon="login"
+                  onPress={markAttendance}
+                  style={styles.primaryButton}
+                  labelStyle={styles.buttonLabel}
+                >
+                  Authenticate & Check In
+                </Button>
+              </Card.Content>
+            </Card>
+          )}
+
+          {/* Employees List */}
           <Card style={styles.card}>
-            <Card.Title 
-              title="Mark Attendance" 
-              titleStyle={styles.cardTitle}
-              left={() => <MaterialCommunityIcons name="fingerprint" size={24} color="#3a86ff" />}
-            />
+            <Card.Title title="Registered Employees" titleStyle={styles.cardTitle} />
             <Card.Content>
-              <TextInput
-                label="Event Name"
-                value={currentEvent}
-                onChangeText={setCurrentEvent}
-                style={styles.input}
-                mode="outlined"
-              />
-              <Button
-                mode="contained"
-                icon="login"
-                onPress={markAttendance}
-                style={styles.primaryButton}
-                labelStyle={styles.buttonLabel}
-              >
-                Authenticate & Check In
-              </Button>
+              {employees.map(employee => (
+                <List.Item
+                  key={employee.id}
+                  title={employee.name}
+                  description={`ID: ${employee.employeeId}`}
+                  titleStyle={styles.listItemTitle}
+                  descriptionStyle={styles.listItemDescription}
+                  left={props => <Avatar.Text {...props} label={employee.name[0]} style={styles.avatar} />}
+                  right={() => (
+                    <View style={styles.actions}>
+                      <IconButton
+                        icon="pencil"
+                        size={20}
+                        onPress={() => startEditing(employee)}
+                        iconColor="#3a86ff"
+                      />
+                      <IconButton
+                        icon="delete"
+                        size={20}
+                        onPress={() => deleteEmployee(employee.id)}
+                        iconColor="#ff4d4d"
+                      />
+                    </View>
+                  )}
+                  style={styles.listItem}
+                />
+              ))}
             </Card.Content>
           </Card>
-        )}
 
-        {/* Employees List */}
-        <Card style={styles.card}>
-          <Card.Title title="Registered Employees" titleStyle={styles.cardTitle} />
-          <Card.Content>
-            {employees.map(employee => (
-              <List.Item
-                key={employee.id}
-                title={employee.name}
-                description={`ID: ${employee.employeeId}`}
-                titleStyle={styles.listItemTitle}
-                descriptionStyle={styles.listItemDescription}
-                left={props => <Avatar.Text {...props} label={employee.name[0]} style={styles.avatar} />}
-                right={() => (
-                  <View style={styles.actions}>
-                    <IconButton
-                      icon="pencil"
-                      size={20}
-                      onPress={() => startEditing(employee)}
-                      iconColor="#3a86ff"
-                    />
-                    <IconButton
-                      icon="delete"
-                      size={20}
-                      onPress={() => deleteEmployee(employee.id)}
-                      iconColor="#ff4d4d"
-                    />
-                  </View>
-                )}
-                style={styles.listItem}
-              />
-            ))}
-          </Card.Content>
-        </Card>
-
-        {/* Attendance Records */}
-        <Card style={styles.card}>
-          <Card.Title title="Attendance Records" titleStyle={styles.cardTitle} />
-          <Card.Content>
-            {attendance.slice(0, 10).map(record => (
-              <List.Item
-                key={record.id}
-                title={record.employeeName}
-                description={`${record.eventId} • ${new Date(record.timestamp).toLocaleString()}`}
-                titleStyle={styles.listItemTitle}
-                descriptionStyle={styles.listItemDescription}
-                left={props => <Avatar.Text {...props} label={record.employeeName[0]} style={styles.avatar} />}
-                right={props => (
-                  <Text {...props} style={[
-                    styles.attendanceStatus,
-                    record.status === 'Checked In' ? styles.statusSuccess : styles.statusWarning
-                  ]}>
-                    {record.status}
-                  </Text>
-                )}
-                style={styles.listItem}
-              />
-            ))}
-          </Card.Content>
-        </Card>
-      </ScrollView>
-
-      {/* Edit Modal */}
-      <Portal>
-        <Modal visible={visible} onDismiss={() => setVisible(false)}>
-          <Card style={styles.modalCard}>
-            <Card.Title title="Edit Employee" titleStyle={styles.cardTitle} />
+          {/* Attendance Records */}
+          <Card style={styles.card}>
+            <Card.Title title="Attendance Logs" titleStyle={styles.cardTitle} />
             <Card.Content>
-              <TextInput
-                label="Full Name"
-                value={editName}
-                onChangeText={setEditName}
-                style={styles.input}
-                mode="outlined"
-              />
-              <TextInput
-                label="Employee ID"
-                value={editId}
-                onChangeText={setEditId}
-                keyboardType="numeric"
-                style={styles.input}
-                mode="outlined"
-              />
-              <Button
-                mode="contained"
-                onPress={saveEdit}
-                style={styles.primaryButton}
-                labelStyle={styles.buttonLabel}
-              >
-                Save Changes
-              </Button>
-              <Button
-                mode="outlined"
-                onPress={() => setVisible(false)}
-                style={styles.secondaryButton}
-                labelStyle={styles.buttonLabel}
-              >
-                Cancel
-              </Button>
+              {attendance.slice(0, 10).map(record => (
+                <List.Item
+                  key={record.id}
+                  title={record.employeeName}
+                  description={`${record.eventId} • ${new Date(record.timestamp).toLocaleString()}`}
+                  titleStyle={styles.listItemTitle}
+                  descriptionStyle={styles.listItemDescription}
+                  left={props => <Avatar.Text {...props} label={record.employeeName[0]} style={styles.avatar} />}
+                  right={props => (
+                    <Text {...props} style={[
+                      styles.attendanceStatus,
+                      record.status === 'Checked In' ? styles.statusSuccess : styles.statusWarning
+                    ]}>
+                      {record.status}
+                    </Text>
+                  )}
+                  style={styles.listItem}
+                />
+              ))}
             </Card.Content>
           </Card>
-        </Modal>
-      </Portal>
-    </View>
+        </ScrollView>
+
+        {/* Edit Modal */}
+        <Portal>
+          <Modal visible={visible} onDismiss={() => setVisible(false)}>
+            <Card style={styles.modalCard}>
+              <Card.Title title="Edit Employee" titleStyle={styles.cardTitle} />
+              <Card.Content>
+                <TextInput
+                  label="Full Name"
+                  value={editName}
+                  onChangeText={setEditName}
+                  style={styles.input}
+                  mode="outlined"
+                />
+                <TextInput
+                  label="Employee ID"
+                  value={editId}
+                  onChangeText={setEditId}
+                  keyboardType="numeric"
+                  style={styles.input}
+                  mode="outlined"
+                />
+                <Button
+                  mode="contained"
+                  onPress={saveEdit}
+                  style={styles.primaryButton}
+                  labelStyle={styles.buttonLabel}
+                >
+                  Save Changes
+                </Button>
+                <Button
+                  mode="outlined"
+                  onPress={() => setVisible(false)}
+                  style={styles.secondaryButton}
+                  labelStyle={styles.buttonLabel}
+                >
+                  Cancel
+                </Button>
+              </Card.Content>
+            </Card>
+          </Modal>
+        </Portal>
+      </View>
+    </PaperProvider>
   );
 }
 

@@ -1,7 +1,8 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as SecureStore from 'expo-secure-store';
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
-import { Appbar, Button, Card, DataTable, Divider, Menu, Searchbar, Text } from 'react-native-paper';
+import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Appbar, Button, Card, DataTable, IconButton, Menu, PaperProvider, Searchbar, Text } from 'react-native-paper';
 
 type AttendanceRecord = {
   id: string;
@@ -12,44 +13,57 @@ type AttendanceRecord = {
   status: 'Checked In' | 'Checked Out';
 };
 
-export default function AdminPanel() {
+export default function AdminScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [filteredRecords, setFilteredRecords] = useState<AttendanceRecord[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<string>('All Events');
-  const [visible, setVisible] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false); // Renamed from 'visible' to avoid confusion
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Sample data - replace with your actual data
+  // Load data from secure storage
+  const loadAttendance = async () => {
+    try {
+      setRefreshing(true);
+      const savedAttendance = await SecureStore.getItemAsync('attendance');
+      if (savedAttendance) {
+        const parsedData = JSON.parse(savedAttendance);
+        setRecords(parsedData);
+        setFilteredRecords(parsedData);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to load attendance data');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Initial load and refresh when screen comes into focus
   useEffect(() => {
-    const sampleData: AttendanceRecord[] = [
-      {
-        id: '1',
-        employeeId: 'EMP001',
-        employeeName: 'John Doe',
-        eventId: 'Morning Shift',
-        timestamp: '2023-06-15T09:00:00Z',
-        status: 'Checked In'
-      },
-      {
-        id: '2',
-        employeeId: 'EMP002',
-        employeeName: 'Jane Smith',
-        eventId: 'Morning Shift',
-        timestamp: '2023-06-15T09:05:00Z',
-        status: 'Checked In'
-      },
-      {
-        id: '3',
-        employeeId: 'EMP003',
-        employeeName: 'Robert Johnson',
-        eventId: 'Afternoon Meeting',
-        timestamp: '2023-06-15T14:30:00Z',
-        status: 'Checked In'
-      },
-    ];
-    setRecords(sampleData);
-    setFilteredRecords(sampleData);
+    loadAttendance();
   }, []);
+
+  // Delete attendance record
+  const deleteRecord = async (recordId: string) => {
+    Alert.alert(
+      'Confirm Delete',
+      'Are you sure you want to delete this attendance record?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: async () => {
+            const updatedRecords = records.filter(record => record.id !== recordId);
+            setRecords(updatedRecords);
+            setFilteredRecords(updatedRecords);
+            await SecureStore.setItemAsync('attendance', JSON.stringify(updatedRecords));
+            Alert.alert('Success', 'Attendance record deleted');
+          }
+        }
+      ]
+    );
+  };
 
   // Filter records based on search and event selection
   useEffect(() => {
@@ -80,107 +94,136 @@ export default function AdminPanel() {
   };
 
   return (
-    <View style={styles.container}>
-      <Appbar.Header style={styles.header}>
-        <Appbar.Content title="Attendance Records" titleStyle={styles.headerTitle} />
-      </Appbar.Header>
+    <PaperProvider>
+      <View style={styles.container}>
+        <Appbar.Header style={styles.header}>
+          <Appbar.Content title="Attendance Records" titleStyle={styles.headerTitle} />
+          <Appbar.Action
+            icon="refresh"
+            onPress={loadAttendance}
+            color="#fff"
+          />
+        </Appbar.Header>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        {/* Filters */}
-        <Card style={styles.filterCard}>
-          <Card.Content style={styles.filterContent}>
-            <Searchbar
-              placeholder="Search employees..."
-              onChangeText={setSearchQuery}
-              value={searchQuery}
-              style={styles.searchBar}
-              inputStyle={styles.searchInput}
+        <ScrollView 
+          contentContainerStyle={styles.content}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={loadAttendance}
+              colors={['#3a86ff']}
+              tintColor="#3a86ff"
             />
-            
-            <Menu
-              visible={visible}
-              onDismiss={() => setVisible(false)}
-              anchor={
-                <Button 
-                  mode="outlined" 
-                  onPress={() => setVisible(true)}
-                  style={styles.eventFilterButton}
-                  contentStyle={styles.eventFilterContent}
-                >
-                  <Text style={styles.eventFilterText}>{selectedEvent}</Text>
-                  <MaterialCommunityIcons name="chevron-down" size={20} />
-                </Button>
-              }
-            >
-              {events.map((event, index) => (
-                <React.Fragment key={event}>
+          }
+        >
+          {/* Filters */}
+          <Card style={styles.filterCard}>
+            <Card.Content style={styles.filterContent}>
+              <Searchbar
+                placeholder="Search..."
+                onChangeText={setSearchQuery}
+                value={searchQuery}
+                style={styles.searchBar}
+                inputStyle={styles.searchInput}
+              />
+              
+              <Menu
+                visible={menuVisible}
+                onDismiss={() => setMenuVisible(false)}
+                anchor={
+                  <Button 
+                    mode="outlined" 
+                    onPress={() => setMenuVisible(true)}
+                    style={styles.eventFilterButton}
+                    contentStyle={styles.eventFilterContent}
+                  >
+                    <Text style={styles.eventFilterText} numberOfLines={1}>
+                      {selectedEvent}
+                    </Text>
+                    <MaterialCommunityIcons name="chevron-down" size={20} />
+                  </Button>
+                }
+              >
+                {events.map((event) => (
                   <Menu.Item 
+                    key={event}
                     onPress={() => {
                       setSelectedEvent(event);
-                      setVisible(false);
+                      setMenuVisible(false);
                     }}
                     title={event}
                     titleStyle={event === selectedEvent ? styles.selectedMenuItem : styles.menuItem}
                   />
-                  {index < events.length - 1 && <Divider />}
-                </React.Fragment>
+                ))}
+              </Menu>
+            </Card.Content>
+          </Card>
+
+          {/* Summary Stats */}
+          <Card style={styles.statsCard}>
+            <Card.Content style={styles.statsContent}>
+              <View style={styles.statItem}>
+                <Text variant="labelMedium" style={styles.statLabel}>Total Records</Text>
+                <Text variant="titleLarge" style={styles.statValue}>{filteredRecords.length}</Text>
+              </View>
+              <View style={styles.statItem}>
+                <Text variant="labelMedium" style={styles.statLabel}>Unique Employees</Text>
+                <Text variant="titleLarge" style={styles.statValue}>
+                  {new Set(filteredRecords.map(r => r.employeeId)).size}
+                </Text>
+              </View>
+            </Card.Content>
+          </Card>
+
+          {/* Data Table */}
+          <Card style={styles.tableCard}>
+            <DataTable>
+              <DataTable.Header style={styles.tableHeader}>
+                <DataTable.Title style={styles.column}>Employee</DataTable.Title>
+                <DataTable.Title style={styles.column}>ID</DataTable.Title>
+                <DataTable.Title style={styles.column}>Event</DataTable.Title>
+                <DataTable.Title style={styles.column}>Time</DataTable.Title>
+                {/* <DataTable.Title style={styles.actionColumn}>Action</DataTable.Title> */}
+                <DataTable.Title style={styles.column}>Action</DataTable.Title>
+              </DataTable.Header>
+
+              {filteredRecords.map(record => (
+                <DataTable.Row key={record.id} style={styles.tableRow}>
+                  <DataTable.Cell style={styles.column}>{record.employeeName}</DataTable.Cell>
+                  <DataTable.Cell style={styles.column}>{record.employeeId}</DataTable.Cell>
+                  <DataTable.Cell style={styles.column}>{record.eventId}</DataTable.Cell>
+                  <DataTable.Cell style={styles.column}>{formatDate(record.timestamp)}</DataTable.Cell>
+                  {/* <DataTable.Cell style={styles.actionColumn}>
+                    <IconButton
+                      icon="trash-can-outline"
+                      size={20}
+                      onPress={() => deleteRecord(record.id)}
+                      iconColor="#ff4444"
+                    />
+                  </DataTable.Cell> */}
+                  <DataTable.Cell style={styles.column}>
+                    <IconButton
+                      icon="trash-can-outline"
+                      size={20}
+                      onPress={() => deleteRecord(record.id)}
+                      iconColor="#ff4444"
+                    />
+                  </DataTable.Cell>
+                </DataTable.Row>
               ))}
-            </Menu>
-          </Card.Content>
-        </Card>
 
-        {/* Summary Stats */}
-        <Card style={styles.statsCard}>
-          <Card.Content style={styles.statsContent}>
-            <View style={styles.statItem}>
-              <Text variant="labelMedium" style={styles.statLabel}>Total Records</Text>
-              <Text variant="titleLarge" style={styles.statValue}>{filteredRecords.length}</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text variant="labelMedium" style={styles.statLabel}>Unique Employees</Text>
-              <Text variant="titleLarge" style={styles.statValue}>
-                {new Set(filteredRecords.map(r => r.employeeId)).size}
-              </Text>
-            </View>
-          </Card.Content>
-        </Card>
-
-        {/* Data Table */}
-        <Card style={styles.tableCard}>
-          <DataTable>
-            <DataTable.Header style={styles.tableHeader}>
-              <DataTable.Title style={styles.column}>Employee</DataTable.Title>
-              <DataTable.Title style={styles.column}>ID</DataTable.Title>
-              <DataTable.Title style={styles.column}>Event</DataTable.Title>
-              <DataTable.Title style={styles.column}>Time</DataTable.Title>
-              <DataTable.Title style={styles.column}>Status</DataTable.Title>
-            </DataTable.Header>
-
-            {filteredRecords.map(record => (
-              <DataTable.Row key={record.id} style={styles.tableRow}>
-                <DataTable.Cell style={styles.column}>{record.employeeName}</DataTable.Cell>
-                <DataTable.Cell style={styles.column}>{record.employeeId}</DataTable.Cell>
-                <DataTable.Cell style={styles.column}>{record.eventId}</DataTable.Cell>
-                <DataTable.Cell style={styles.column}>{formatDate(record.timestamp)}</DataTable.Cell>
-                <DataTable.Cell style={styles.column}>
-                  <Text style={record.status === 'Checked In' ? styles.statusSuccess : styles.statusWarning}>
-                    {record.status}
-                  </Text>
-                </DataTable.Cell>
-              </DataTable.Row>
-            ))}
-
-            {filteredRecords.length === 0 && (
-              <DataTable.Row>
-                <DataTable.Cell style={styles.noRecords}>
-                  <Text style={styles.noRecordsText}>No attendance records found</Text>
-                </DataTable.Cell>
-              </DataTable.Row>
-            )}
-          </DataTable>
-        </Card>
-      </ScrollView>
-    </View>
+              {filteredRecords.length === 0 && (
+                <DataTable.Row>
+                  <DataTable.Cell style={styles.noRecords}>
+                    <Text style={styles.noRecordsText}>No attendance records found</Text>
+                  </DataTable.Cell>
+                </DataTable.Row>
+              )}
+            </DataTable>
+          </Card>
+        </ScrollView>
+      </View>
+    </PaperProvider>
   );
 }
 
@@ -233,6 +276,7 @@ const styles = StyleSheet.create({
   },
   eventFilterText: {
     flex: 1,
+    marginRight: 8,
   },
   menuItem: {
     color: '#495057',
@@ -280,22 +324,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 12,
     paddingHorizontal: 8,
+    flex: 1,
   },
+  // actionColumn: {
+  //   justifyContent: 'center',
+  //   paddingVertical: 0,
+  //   paddingHorizontal: 4,
+  //   width: 60,
+  // },
   noRecords: {
     justifyContent: 'center',
     paddingVertical: 24,
-    flex: 5,
   },
   noRecordsText: {
     textAlign: 'center',
     color: '#6c757d',
-  },
-  statusSuccess: {
-    color: '#28a745',
-    fontWeight: '500',
-  },
-  statusWarning: {
-    color: '#ffc107',
-    fontWeight: '500',
   },
 });
