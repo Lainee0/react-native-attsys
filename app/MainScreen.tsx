@@ -1,14 +1,15 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import React, { useEffect, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import ReactNativeBiometrics from 'react-native-biometrics';
 import { Appbar, Avatar, Button, Card, IconButton, List, Modal, PaperProvider, Portal, Text, TextInput } from 'react-native-paper';
 
 type Employee = {
   id: string;
   name: string;
   employeeId: string;
+  biometricPublicKey?: string;
 };
 
 type AttendanceRecord = {
@@ -33,22 +34,64 @@ export default function MainScreen() {
   const [editId, setEditId] = useState('');
   const [visible, setVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [biometrics, setBiometrics] = useState<ReactNativeBiometrics | null>(null);
+  const [biometricsAvailable, setBiometricsAvailable] = useState(false);
 
-  // Load data on startup and when refreshed
+  // Initialize biometrics on component mount
   useEffect(() => {
-    loadData();
+    const initBiometrics = async () => {
+      try {
+        const instance = new ReactNativeBiometrics();
+        const { available } = await instance.isSensorAvailable();
+        
+        if (!available) {
+          throw new Error('Biometrics not available');
+        }
+        
+        setBiometrics(instance);
+        setBiometricsAvailable(true);
+      } catch (error) {
+        console.error('Biometrics init error:', error);
+        setBiometrics(null);
+        setBiometricsAvailable(false);
+        Alert.alert('Biometrics Error', 
+          'Failed to initialize biometric features. ' + 
+          'Please check your device settings or try again.'
+        );
+      }
+    };
+
+    initBiometrics();
   }, []);
 
   const loadData = async () => {
     try {
       setRefreshing(true);
-      const savedEmployees = await SecureStore.getItemAsync('employees');
-      const savedAttendance = await SecureStore.getItemAsync('attendance');
+      const [savedEmployees, savedAttendance] = await Promise.all([
+        SecureStore.getItemAsync('employees'),
+        SecureStore.getItemAsync('attendance')
+      ]);
       
-      if (savedEmployees) setEmployees(JSON.parse(savedEmployees));
-      if (savedAttendance) setAttendance(JSON.parse(savedAttendance));
+      if (savedEmployees) {
+        try {
+          setEmployees(JSON.parse(savedEmployees));
+        } catch (e) {
+          console.error('Failed to parse employees:', e);
+          await SecureStore.deleteItemAsync('employees');
+        }
+      }
+      
+      if (savedAttendance) {
+        try {
+          setAttendance(JSON.parse(savedAttendance));
+        } catch (e) {
+          console.error('Failed to parse attendance:', e);
+          await SecureStore.deleteItemAsync('attendance');
+        }
+      }
     } catch (error) {
-      Alert.alert('Error', 'Failed to load data');
+      console.error('Load error:', error);
+      Alert.alert('Error', 'Failed to load data. Please try refreshing.');
     } finally {
       setRefreshing(false);
     }
@@ -64,8 +107,14 @@ export default function MainScreen() {
     }
   };
 
-  // Employee Registration
+  // Update the registerEmployee function with proper biometrics checks
   const registerEmployee = async () => {
+    // Add this check first
+    if (!biometrics) {
+      Alert.alert('Error', 'Biometrics service is still initializing. Please try again in a moment.');
+      return;
+    }
+    
     if (!newEmployeeName.trim() || !newEmployeeId.trim()) {
       Alert.alert('Error', 'Please enter both name and ID');
       return;
@@ -76,10 +125,28 @@ export default function MainScreen() {
       return;
     }
 
+    if (!biometrics) {
+      Alert.alert('Error', 'Biometrics not initialized');
+      return;
+    }
+
+    if (!biometricsAvailable) {
+      Alert.alert('Error', 'Biometrics not available on this device');
+      return;
+    }
+
     try {
-      const { success } = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Register your fingerprint',
-        disableDeviceFallback: true,
+      // Create biometric keys
+      const { publicKey } = await biometrics.createKeys('Register fingerprint');
+      
+      if (!publicKey) {
+        Alert.alert('Error', 'Failed to create biometric keys');
+        return;
+      }
+
+      // Verify enrollment with simplePrompt
+      const { success } = await biometrics.simplePrompt({
+        promptMessage: 'Verify your fingerprint to complete registration',
       });
 
       if (success) {
@@ -87,29 +154,25 @@ export default function MainScreen() {
           id: `emp-${Date.now()}`,
           name: newEmployeeName,
           employeeId: newEmployeeId,
+          biometricPublicKey: publicKey,
         };
 
-        // Create updated employees array
         const updatedEmployees = [...employees, newEmployee];
-        
-        // Update state
         setEmployees(updatedEmployees);
         setNewEmployeeName('');
         setNewEmployeeId('');
-
-        // Save to SecureStore
-        try {
-          await SecureStore.setItemAsync('employees', JSON.stringify(updatedEmployees));
-          Alert.alert('Success', 'Employee registered with fingerprint');
-        } catch (saveError) {
-          console.error('Failed to save employee:', saveError);
-          Alert.alert('Error', 'Failed to save employee data');
-          // Rollback the state if save fails
-          setEmployees(employees);
-        }
+        
+        await SecureStore.setItemAsync('employees', JSON.stringify(updatedEmployees));
+        Alert.alert('Success', 'Employee registered with fingerprint');
+      } else {
+        Alert.alert('Error', 'Fingerprint verification failed');
       }
     } catch (error) {
-      Alert.alert('Error', 'Fingerprint registration failed');
+      console.error('Registration error:', error);
+      Alert.alert(
+        'Registration Failed',
+        error instanceof Error ? error.message : 'Biometric registration failed. Please try again.'
+      );
     }
   };
 
@@ -177,46 +240,76 @@ export default function MainScreen() {
     );
   };
 
-  // Mark Attendance
+  // Update markAttendance function to use the biometrics state
   const markAttendance = async () => {
     if (!currentEvent) {
       Alert.alert('Error', 'Please enter event name');
       return;
     }
 
+    if (!biometrics) {
+      Alert.alert('Error', 'Biometrics not initialized');
+      return;
+    }
+
     try {
-      const { success } = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Authenticate for attendance',
+      const enrolledEmployees = employees.filter(e => e.biometricPublicKey);
+      if (enrolledEmployees.length === 0) {
+        Alert.alert('Error', 'No employees with registered biometrics');
+        return;
+      }
+
+      // First authenticate with simplePrompt
+      const { success } = await biometrics.simplePrompt({
+        promptMessage: 'Authenticate to check in',
       });
 
-      if (success) {
-        // Find the employee by matching fingerprint (in real app use actual biometric matching)
-        // For demo, we'll use the first employee
-        const employee = employees[0];
-        
-        if (employee) {
-          const newRecord: AttendanceRecord = {
-            id: `att-${Date.now()}`,
-            employeeId: employee.employeeId,
-            employeeName: employee.name,
-            eventId: currentEvent,
-            timestamp: new Date().toISOString(),
-            status: 'Checked In',
-          };
-
-          // Update both local state and storage
-          const updatedAttendance = [...attendance, newRecord];
-          setAttendance(updatedAttendance);
-          await SecureStore.setItemAsync('attendance', JSON.stringify(updatedAttendance));
-          
-          Alert.alert('Success', `${employee.name} checked in to ${currentEvent}`);
-          setCurrentEvent('');
-        } else {
-          Alert.alert('Error', 'No registered employees found');
-        }
+      if (!success) {
+        Alert.alert('Error', 'Authentication failed');
+        return;
       }
+
+      // Show employee selection after successful authentication
+      Alert.alert(
+        'Select Employee',
+        'Choose the employee checking in:',
+        enrolledEmployees.map(employee => ({
+          text: `${employee.name} (${employee.employeeId})`,
+          onPress: async () => {
+            try {
+              // Verify again with the specific employee's biometrics
+              const { success: employeeAuthSuccess } = await biometrics.simplePrompt({
+                promptMessage: `Verify ${employee.name}'s identity`,
+              });
+
+              if (employeeAuthSuccess) {
+                const newRecord: AttendanceRecord = {
+                  id: `att-${Date.now()}`,
+                  employeeId: employee.employeeId,
+                  employeeName: employee.name,
+                  eventId: currentEvent,
+                  timestamp: new Date().toISOString(),
+                  status: 'Checked In',
+                };
+
+                const updatedAttendance = [...attendance, newRecord];
+                setAttendance(updatedAttendance);
+                await SecureStore.setItemAsync('attendance', JSON.stringify(updatedAttendance));
+                Alert.alert('Success', `${employee.name} checked in to ${currentEvent}`);
+                setCurrentEvent('');
+              } else {
+                Alert.alert('Error', 'Biometric verification failed');
+              }
+            } catch (error) {
+              console.error('Verification error:', error);
+              Alert.alert('Error', 'Verification process failed');
+            }
+          }
+        }))
+      );
     } catch (error) {
-      Alert.alert('Error', 'Authentication failed');
+      console.error('Authentication error:', error);
+      Alert.alert('Error', 'Biometric authentication failed');
     }
   };
 
